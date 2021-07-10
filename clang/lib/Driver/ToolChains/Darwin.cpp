@@ -2021,9 +2021,17 @@ void DarwinClang::AddClangCXXStdlibIncludeArgs(
 
   switch (GetCXXStdlibType(DriverArgs)) {
   case ToolChain::CST_Libcxx: {
+    if (!DriverArgs.hasArg(options::OPT_nostdinc)) {
+      // /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/../../usr/include/c++/v1
+      // /Library/Developer/CommandLineTools/usr/include/c++/v1
+      llvm::SmallString<128> P2 = Sysroot;
+      llvm::sys::path::append(P2, "..", "..");
+      llvm::sys::path::append(P2, "usr", "include", "c++", "v1");
+      addSystemInclude(DriverArgs, CC1Args, P2);
+    }
     // On Darwin, libc++ is installed alongside the compiler in
     // include/c++/v1, so get from '<install>/bin' to '<install>/include/c++/v1'.
-    {
+    if (false) {
       llvm::SmallString<128> P = llvm::StringRef(getDriver().getInstalledDir());
       // Note that P can be relative, so we have to '..' and not parent_path.
       llvm::sys::path::append(P, "..", "include", "c++", "v1");
