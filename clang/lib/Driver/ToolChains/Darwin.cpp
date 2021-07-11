@@ -2119,6 +2119,7 @@ void DarwinClang::AddClangCXXStdlibIncludeArgs(
     // On Darwin, libc++ can be installed in one of the following two places:
     // 1. Alongside the compiler in         <install>/include/c++/v1
     // 2. In a SDK (or a custom sysroot) in <sysroot>/usr/include/c++/v1
+    // 3. In /Library/Developer/CommandLineTools/usr/include/c++/v1
     //
     // The precendence of paths is as listed above, i.e. we take the first path
     // that exists. Also note that we never include libc++ twice -- we take the
@@ -2148,6 +2149,17 @@ void DarwinClang::AddClangCXXStdlibIncludeArgs(
       return;
     } else if (DriverArgs.hasArg(options::OPT_v)) {
       llvm::errs() << "ignoring nonexistent directory \"" << SysrootUsr
+                   << "\"\n";
+    }
+
+    // Otherwise, check for (3)
+    llvm::SmallString<128> CLT = 
+      StringRef("/Library/Developer/CommandLineTools/usr/include/c++/v1");
+    if (getVFS().exists(CLT)) {
+      addSystemInclude(DriverArgs, CC1Args, CLT);
+      return;
+    } else if (DriverArgs.hasArg(options::OPT_v)) {
+      llvm::errs() << "ignoring nonexistent directory \"" << CLT
                    << "\"\n";
     }
 
