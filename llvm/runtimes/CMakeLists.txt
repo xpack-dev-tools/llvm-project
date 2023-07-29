@@ -70,14 +70,22 @@ ${error} Set RUNTIMES_BUILD_ALLOW_DARWIN to allow a single darwin triple.")
   endforeach()
 endfunction()
 
+macro(set_enable_per_target_runtime_dir)
+  # May have been set by llvm/CMakeLists.txt.
+  if (NOT DEFINED LLVM_ENABLE_PER_TARGET_RUNTIME_DIR)
+    # AIX should fold 32-bit & 64-bit arch libraries into a single archive.
+    if (LLVM_TARGET_TRIPLE MATCHES "aix")
+      set(LLVM_ENABLE_PER_TARGET_RUNTIME_DIR OFF)
+    else()
+      set(LLVM_ENABLE_PER_TARGET_RUNTIME_DIR ON)
+    endif()
+  endif()
+endmacro()
+
 function(builtin_default_target compiler_rt_path)
   cmake_parse_arguments(ARG "" "" "DEPENDS" ${ARGN})
 
-  set(LLVM_ENABLE_PER_TARGET_RUNTIME_DIR_default ON)
-  # AIX should fold 32-bit & 64-bit arch libraries into a single archive.
-  if (LLVM_TARGET_TRIPLE MATCHES "aix")
-    set(LLVM_ENABLE_PER_TARGET_RUNTIME_DIR_default OFF)
-  endif()
+  set_enable_per_target_runtime_dir()
 
   llvm_ExternalProject_Add(builtins
                            ${compiler_rt_path}/lib/builtins
@@ -85,7 +93,7 @@ function(builtin_default_target compiler_rt_path)
                            CMAKE_ARGS -DLLVM_LIBRARY_OUTPUT_INTDIR=${LLVM_LIBRARY_DIR}
                                       -DLLVM_RUNTIME_OUTPUT_INTDIR=${LLVM_TOOLS_BINARY_DIR}
                                       -DLLVM_DEFAULT_TARGET_TRIPLE=${LLVM_TARGET_TRIPLE}
-                                      -DLLVM_ENABLE_PER_TARGET_RUNTIME_DIR=${LLVM_ENABLE_PER_TARGET_RUNTIME_DIR_default}
+                                      -DLLVM_ENABLE_PER_TARGET_RUNTIME_DIR=${LLVM_ENABLE_PER_TARGET_RUNTIME_DIR}
                                       -DCMAKE_C_COMPILER_WORKS=ON
                                       -DCMAKE_ASM_COMPILER_WORKS=ON
                                       ${COMMON_CMAKE_ARGS}
@@ -98,20 +106,35 @@ function(builtin_default_target compiler_rt_path)
                            ${EXTRA_ARGS})
 endfunction()
 
+# Find variables with names of the form:
+# ${kind}_${target}_<runtimes cmake option>
+# Rename them so they can be passed directly to the runtime or builtins that
+# they apply to.
+#
+# For example:
+# RUNTIMES_armv8l-unknown-linux-gnueabihf_COMPILER_RT_BUILD_GWP_ASAN=OFF
+# Would be changed to:
+# COMPILER_RT_BUILD_GWP_ASAN=OFF
+# So it can be passed directly to compiler-rt.
+function (get_extra_cmake_args kind target)
+  get_cmake_property(variableNames VARIABLES)
+  foreach(variableName ${variableNames})
+    string(FIND "${variableName}" "${kind}_${target}" out)
+    if("${out}" EQUAL 0)
+      string(REPLACE "${kind}_${target}_" "" new_name ${variableName})
+      string(REPLACE ";" "|" new_value "${${variableName}}")
+      list(APPEND ${target}_extra_args "-D${new_name}=${new_value}")
+    endif()
+  endforeach()
+  set(${target}_extra_args ${${target}_extra_args} PARENT_SCOPE)
+endfunction()
+
 function(builtin_register_target compiler_rt_path target)
   cmake_parse_arguments(ARG "" "" "DEPENDS" ${ARGN})
 
   check_apple_target(${target} builtin)
 
-  get_cmake_property(variableNames VARIABLES)
-  foreach(variableName ${variableNames})
-    string(FIND "${variableName}" "BUILTINS_${target}" out)
-    if("${out}" EQUAL 0)
-      string(REPLACE "BUILTINS_${target}_" "" new_name ${variableName})
-      string(REPLACE ";" "|" new_value "${${variableName}}")
-      list(APPEND ${target}_extra_args "-D${new_name}=${new_value}")
-    endif()
-  endforeach()
+  get_extra_cmake_args("BUILTINS" ${target})
 
   llvm_ExternalProject_Add(builtins-${target}
                            ${compiler_rt_path}/lib/builtins
@@ -197,7 +220,7 @@ foreach(entry ${runtimes})
 endforeach()
 
 function(runtime_default_target)
-  cmake_parse_arguments(ARG "" "" "DEPENDS;PREFIXES" ${ARGN})
+  cmake_parse_arguments(ARG "" "" "DEPENDS;PREFIXES;CMAKE_ARGS" ${ARGN})
 
   include(${LLVM_BINARY_DIR}/runtimes/Components.cmake OPTIONAL)
   set(SUB_CHECK_TARGETS ${SUB_CHECK_TARGETS} PARENT_SCOPE)
@@ -223,11 +246,9 @@ function(runtime_default_target)
     list(APPEND test_targets runtimes-test-depends check-runtimes)
   endif()
 
-  set(LLVM_ENABLE_PER_TARGET_RUNTIME_DIR_default ON)
-  # AIX should fold 32-bit & 64-bit arch libraries into a single archive.
-  if (LLVM_TARGET_TRIPLE MATCHES "aix")
-    set(LLVM_ENABLE_PER_TARGET_RUNTIME_DIR_default OFF)
-  endif()
+  get_extra_cmake_args("RUNTIMES" ${LLVM_TARGET_TRIPLE})
+
+  set_enable_per_target_runtime_dir()
 
   llvm_ExternalProject_Add(runtimes
                            ${CMAKE_CURRENT_SOURCE_DIR}/../../runtimes
@@ -237,13 +258,14 @@ function(runtime_default_target)
                                       -DLLVM_INCLUDE_TESTS=${LLVM_INCLUDE_TESTS}
                                       -DLLVM_DEFAULT_TARGET_TRIPLE=${LLVM_TARGET_TRIPLE}
                                       -DLLVM_ENABLE_PROJECTS_USED=${LLVM_ENABLE_PROJECTS_USED}
-                                      -DLLVM_ENABLE_PER_TARGET_RUNTIME_DIR=${LLVM_ENABLE_PER_TARGET_RUNTIME_DIR_default}
+                                      -DLLVM_ENABLE_PER_TARGET_RUNTIME_DIR=${LLVM_ENABLE_PER_TARGET_RUNTIME_DIR}
                                       -DLLVM_BUILD_TOOLS=${LLVM_BUILD_TOOLS}
                                       -DCMAKE_C_COMPILER_WORKS=ON
                                       -DCMAKE_CXX_COMPILER_WORKS=ON
                                       -DCMAKE_ASM_COMPILER_WORKS=ON
                                       ${COMMON_CMAKE_ARGS}
                                       ${RUNTIMES_CMAKE_ARGS}
+                                      ${${LLVM_TARGET_TRIPLE}_extra_args}
                            PASSTHROUGH_PREFIXES LLVM_ENABLE_RUNTIMES
                                                 LLVM_USE_LINKER
                                                 ${ARG_PREFIXES}
@@ -334,6 +356,8 @@ function(runtime_register_target name target)
     list(APPEND ${name}_extra_args -DLLVM_ENABLE_RUNTIMES=${LLVM_ENABLE_RUNTIMES_PASSTHROUGH})
   endif()
 
+  set_enable_per_target_runtime_dir()
+
   llvm_ExternalProject_Add(runtimes-${name}
                            ${CMAKE_CURRENT_SOURCE_DIR}/../../runtimes
                            DEPENDS ${${name}_deps}
@@ -342,7 +366,7 @@ function(runtime_register_target name target)
                                       -DLLVM_INCLUDE_TESTS=${LLVM_INCLUDE_TESTS}
                                       -DLLVM_DEFAULT_TARGET_TRIPLE=${target}
                                       -DLLVM_ENABLE_PROJECTS_USED=${LLVM_ENABLE_PROJECTS_USED}
-                                      -DLLVM_ENABLE_PER_TARGET_RUNTIME_DIR=ON
+                                      -DLLVM_ENABLE_PER_TARGET_RUNTIME_DIR=${LLVM_ENABLE_PER_TARGET_RUNTIME_DIR}
                                       -DCMAKE_C_COMPILER_WORKS=ON
                                       -DCMAKE_CXX_COMPILER_WORKS=ON
                                       -DCMAKE_ASM_COMPILER_WORKS=ON
