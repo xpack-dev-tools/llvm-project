@@ -261,6 +261,14 @@ Linux::Linux(const Driver &D, const llvm::Triple &Triple, const ArgList &Args)
   const std::string OSLibDir = std::string(getOSLibDir(Triple, Args));
   const std::string MultiarchTriple = getMultiarchTriple(D, Triple, SysRoot);
 
+  // Similar to the logic for GCC above, if we are currently running Clang
+  // inside of the requested system root, add its parent library path to those
+  // searched.
+  // FIXME: It's not clear whether we should use the driver's installed
+  // directory ('Dir' below) or the ResourceDir.
+  if (StringRef(D.Dir).startswith(SysRoot))
+    addPathIfExists(D, D.Dir + "/../lib", Paths);
+
   // mips32: Debian multilib, we use /libo32, while in other case, /lib is
   // used. We need add both libo32 and /lib.
   if (Arch == llvm::Triple::mips || Arch == llvm::Triple::mipsel) {
@@ -300,13 +308,6 @@ Linux::Linux(const Driver &D, const llvm::Triple &Triple, const ArgList &Args)
   }
 
   Generic_GCC::AddMultiarchPaths(D, SysRoot, OSLibDir, Paths);
-
-  // The deprecated -DLLVM_ENABLE_PROJECTS=libcxx configuration installs
-  // libc++.so in D.Dir+"/../lib/". Detect this path.
-  // TODO Remove once LLVM_ENABLE_PROJECTS=libcxx is unsupported.
-  if (StringRef(D.Dir).startswith(SysRoot) &&
-      D.getVFS().exists(D.Dir + "/../lib/libc++.so"))
-    addPathIfExists(D, D.Dir + "/../lib", Paths);
 
   addPathIfExists(D, SysRoot + "/lib", Paths);
   addPathIfExists(D, SysRoot + "/usr/lib", Paths);
