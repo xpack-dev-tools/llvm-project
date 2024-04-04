@@ -86,9 +86,14 @@ typedef Boolean (*CFStringGetCStringFuncTy)(CFStringRef, char *, CFIndex,
                                             CFStringEncoding);
 typedef void (*CFReleaseFuncTy)(CFTypeRef);
 
+// xPack
+#if defined(MAC_OS_X_VERSION_10_15) && \
+    MAC_OS_X_VERSION_MIN_REQUIRED > MAC_OS_X_VERSION_10_15
 extern __attribute__((weak_import))
 bool _availability_version_check(uint32_t count,
                                  dyld_build_version_t versions[]);
+#endif
+// xPack
 
 static void _initializeAvailabilityCheck(bool LoadPlist) {
   if (AvailabilityVersionCheck && !LoadPlist) {
@@ -97,9 +102,17 @@ static void _initializeAvailabilityCheck(bool LoadPlist) {
     return;
   }
 
+// xPack
+#if defined(MAC_OS_X_VERSION_10_15) && \
+    MAC_OS_X_VERSION_MIN_REQUIRED > MAC_OS_X_VERSION_10_15
   // Use the new API if it's is available.
   if (_availability_version_check)
     AvailabilityVersionCheck = &_availability_version_check;
+#else
+  AvailabilityVersionCheck = (AvailabilityVersionCheckFuncTy)dlsym(
+     RTLD_DEFAULT, "_availability_version_check");
+#endif
+// xPack
 
   if (AvailabilityVersionCheck && !LoadPlist) {
     // New API is supported and we're not being asked to load the plist,
